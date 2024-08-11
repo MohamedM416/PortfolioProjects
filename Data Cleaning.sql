@@ -1,191 +1,142 @@
- -- Data Cleaning
+-- Step 1: Create a staging table with the same structure as the original layoffs table
+CREATE TABLE layoff_staging LIKE layoffs;
 
-CREATE TABLE layoff_staging
-like layoffs;
+-- Step 2: Insert all data from the layoffs table into the staging table
+INSERT INTO layoff_staging
+SELECT * 
+FROM layoffs;
 
-select * 
-from layoff_staging;
+-- Step 3: Identify duplicates by assigning a row number based on key fields
+SELECT *,
+ROW_NUMBER() OVER (
+  PARTITION BY company, location, industry, total_laid_off, percentage_laid_off, `date`, stage, funds_raised_millions
+) AS row_num
+FROM layoff_staging;
 
-insert layoff_staging
-select * 
-from layoffs;
-
-
-select *,
-row_Number() over (
-partition by company, location, industry, total_laid_off, percentage_laid_off, `date`, stage, funds_raised_millions) As row_num
-from layoff_staging;
-
-with duplicate_cte as
-(
-select *,
-row_Number() over (
-partition by company, location, industry, total_laid_off, percentage_laid_off, `date`, stage, funds_raised_millions ) As row_num
-from layoff_staging
+-- Step 4: Use a CTE to filter out duplicate rows
+WITH duplicate_cte AS (
+  SELECT *,
+  ROW_NUMBER() OVER (
+    PARTITION BY company, location, industry, total_laid_off, percentage_laid_off, `date`, stage, funds_raised_millions
+  ) AS row_num
+  FROM layoff_staging
 )
-select *
-from duplicate_cte
-where row_num > 1;
+SELECT *
+FROM duplicate_cte
+WHERE row_num > 1;
 
-CREATE TABLE `layoff_staging2` (
-  `company` text,
-  `location` text,
-  `industry` text,
-  `total_laid_off` int DEFAULT NULL,
-  `percentage_laid_off` text,
-  `date` text,
-  `stage` text,
-  `country` text,
-  `funds_raised_millions` int DEFAULT NULL,
-  `row_num` int
+-- Step 5: Create a new staging table for cleaned data
+CREATE TABLE layoff_staging2 (
+  `company` TEXT,
+  `location` TEXT,
+  `industry` TEXT,
+  `total_laid_off` INT DEFAULT NULL,
+  `percentage_laid_off` TEXT,
+  `date` TEXT,
+  `stage` TEXT,
+  `country` TEXT,
+  `funds_raised_millions` INT DEFAULT NULL,
+  `row_num` INT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-select * 
-from layoff_staging2;
+-- Step 6: Insert data into the new staging table with row numbers
+INSERT INTO layoff_staging2
+SELECT *,
+ROW_NUMBER() OVER (
+  PARTITION BY company, location, industry, total_laid_off, percentage_laid_off, `date`, stage, funds_raised_millions
+) AS row_num
+FROM layoff_staging;
 
-insert into layoff_staging2
-select *,
-row_Number() over (
-partition by company, location, industry, total_laid_off, percentage_laid_off, `date`, stage, funds_raised_millions ) As row_num
-from layoff_staging;
+-- Step 7: Trim whitespace from the 'company' column
+UPDATE layoff_staging2
+SET company = TRIM(company);
 
-select *
-from layoff_staging2 
-where row_num > 1; 
+-- Step 8: Standardize the 'industry' column (e.g., correct capitalization)
+UPDATE layoff_staging2 
+SET industry = 'Crypto'
+WHERE industry LIKE 'crypto%';
 
-update layoff_staging2
-set company = trim(company);
+-- Step 9: Correct country names (e.g., replacing incorrect or politically sensitive names)
+UPDATE layoff_staging2 
+SET country = 'Palestine'
+WHERE country LIKE 'israel';
 
-update layoff_staging2 
-set industry = 'Crypto'
-where industry like 'crypto%';
+-- Step 10: Remove trailing periods from country names
+UPDATE layoff_staging2 
+SET country = TRIM(TRAILING '.' FROM country)
+WHERE country LIKE 'United States%';
 
-update layoff_staging2 
-set country = 'plastine'
-where country like 'israel';
+-- Step 11: Convert 'date' strings to a standardized date format
+UPDATE layoff_staging2
+SET `date` = STR_TO_DATE(`date`, '%m/%d/%Y');
 
-select distinct country, trim(trailing '.' from country)
-from layoff_staging2
-order by 1;
+ALTER TABLE layoff_staging2
+MODIFY COLUMN `date` DATE;
 
-update layoff_staging2 
-set country = trim(trailing '.' from country)
-where country like 'United States%';
+-- Step 12: Handle missing data by setting empty fields to NULL
+UPDATE layoff_staging2
+SET industry = NULL
+WHERE industry = '';
 
-select `date`
-from layoff_staging2;
+-- Step 13: Delete rows with null values in key columns
+DELETE
+FROM layoff_staging2
+WHERE total_laid_off IS NULL
+AND percentage_laid_off IS NULL;
 
-update layoff_staging2
-set `date` = str_to_date(`date`, '%m/%d/%Y');
+-- Step 14: Drop the 'row_num' column after cleaning
+ALTER TABLE layoff_staging2
+DROP COLUMN row_num;
 
-Alter table layoff_staging2
-modify column `date` DATE;
-select * 
-from layoff_staging2;
+-- Step 15: Exploratory Data Analysis
 
-select *
-from layoff_staging2 
-where total_laid_off is null
-and percentage_laid_off is null;
+-- Calculate the maximum values for total layoffs and percentage laid off
+SELECT MAX(total_laid_off), MAX(percentage_laid_off)
+FROM layoff_staging2;
 
-update layoff_staging2
-set industry = null
-where industry = '';
+-- Summarize layoffs by company
+SELECT company, SUM(total_laid_off)
+FROM layoff_staging2
+GROUP BY company
+ORDER BY 2 DESC;
 
-select * 
-from layoff_staging2 
-where industry is null
-or industry = '';
+-- Analyze date ranges
+SELECT MIN(`date`), MAX(`date`)
+FROM layoff_staging2;
 
-select * 
-from layoff_staging2
-where company Like 'Bally%';
+-- Layoffs by year
+SELECT YEAR(`date`), SUM(total_laid_off)
+FROM layoff_staging2
+GROUP BY YEAR(`date`)
+ORDER BY 1 DESC;
 
-select *
-from layoff_staging2 t1
-join layoff_staging2 t2 
-	on t1.company = t2.company
-    and t1.location = t2.location
-where (t1.industry is null or t1.industry = '')
-and t2.industry is not null;
+-- Monthly analysis of layoffs
+SELECT SUBSTRING(`date`, 1, 7) AS `MONTH`, SUM(total_laid_off)
+FROM layoff_staging2
+WHERE SUBSTRING(`date`, 1, 7) IS NOT NULL
+GROUP BY `MONTH`
+ORDER BY 1 ASC;
 
-update layoff_staging2 t1
-join layoff_staging2 t2 
-	on t1.company = t2.company
-set t1.industry = t2.industry
-where (t1.industry is null or t1.industry = '')
-and t2.industry is not null;
-
-select *
-from layoff_staging2 
-where total_laid_off is null
-and percentage_laid_off is null;
-
-delete
-from layoff_staging2 
-where total_laid_off is null
-and percentage_laid_off is null;
-
-select *
-from layoff_staging2 ;
-
-alter table layoff_staging2
-drop column row_num;
- -- Exploratory Data
-select max(total_laid_off), max(percentage_laid_off)
-from layoff_staging2;
-
-select company, sum(total_laid_off)
-from layoff_staging2
-group by company
-order by 2 desc;
-
-select MIN(`date`),MAX(`date`)
-from layoff_staging2;
-
-select year(`date`), sum(total_laid_off)
-from layoff_staging2
-group by year(`date`)
-order by 1 desc;
-
-select substring(`date`,1,7) as `MONTH`, sum(total_laid_off)
-from layoff_staging2
-where substring(`date`,1,7) is not null
-group by `MONTH`
-order by 1 ASC;
-
-with rolling_totale as
-(
-select substring(`date`,1,7) as `MONTH`, sum(total_laid_off) as total_off
-from layoff_staging2
-where substring(`date`,1,7) is not null
-group by `MONTH`
-order by 1 ASC
+-- Rolling totals of layoffs over months
+WITH rolling_totals AS (
+  SELECT SUBSTRING(`date`, 1, 7) AS `MONTH`, SUM(total_laid_off) AS total_off
+  FROM layoff_staging2
+  WHERE SUBSTRING(`date`, 1, 7) IS NOT NULL
+  GROUP BY `MONTH`
+  ORDER BY 1 ASC
 )
-select `MONTH`, sum(total_off) over(order by `MONTH`) as rolling_over
-from rolling_totale;
+SELECT `MONTH`, SUM(total_off) OVER (ORDER BY `MONTH`) AS rolling_over
+FROM rolling_totals;
 
-select company, sum(total_laid_off)
-from layoff_staging2
-group by company
-order by 2 desc;
-
-select company, year(`date`), sum(total_laid_off)
-from layoff_staging2
-group by company, year(`date`);
-
-with company_year (company,years,total_laid_off) as 
-(
-select company, year(`date`), sum(total_laid_off)
-from layoff_staging2
-group by company, year(`date`)
-), company_year_rank as
-(
-select *, dense_rank() over(partition by years order by total_laid_off desc) As rainking
-from company_year
-where years is not null
+-- Rank companies by layoffs per year
+WITH company_year AS (
+  SELECT company, YEAR(`date`), SUM(total_laid_off)
+  FROM layoff_staging2
+  GROUP BY company, YEAR(`date`)
+), company_year_rank AS (
+  SELECT *, DENSE_RANK() OVER (PARTITION BY years ORDER BY total_laid_off DESC) AS ranking
+  FROM company_year
+  WHERE years IS NOT NULL
 )
-select * 
-from company_year_rank
-;
-
+SELECT * 
+FROM company_year_rank;
