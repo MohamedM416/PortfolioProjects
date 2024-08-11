@@ -1,58 +1,70 @@
--- Exploratory Data
-select max(total_laid_off), max(percentage_laid_off)
-from layoff_staging2;
+-- 1. Calculate Maximum Values
+-- Get the maximum number of layoffs and the maximum percentage laid off across all records
+SELECT MAX(total_laid_off), MAX(percentage_laid_off)
+FROM layoff_staging2;
 
-select company, sum(total_laid_off)
-from layoff_staging2
-group by company
-order by 2 desc;
+-- 2. Total Layoffs by Company
+-- Summarize total layoffs for each company and order the results by the highest totals
+SELECT company, SUM(total_laid_off)
+FROM layoff_staging2
+GROUP BY company
+ORDER BY SUM(total_laid_off) DESC;
 
-select MIN(`date`),MAX(`date`)
-from layoff_staging2;
+-- 3. Date Range Analysis
+-- Find the earliest and latest dates in the dataset
+SELECT MIN(`date`), MAX(`date`)
+FROM layoff_staging2;
 
-select year(`date`), sum(total_laid_off)
-from layoff_staging2
-group by year(`date`)
-order by 1 desc;
+-- 4. Annual Layoffs Summary
+-- Aggregate the total layoffs per year and order by year in descending order
+SELECT YEAR(`date`), SUM(total_laid_off)
+FROM layoff_staging2
+GROUP BY YEAR(`date`)
+ORDER BY YEAR(`date`) DESC;
 
-select substring(`date`,1,7) as `MONTH`, sum(total_laid_off)
-from layoff_staging2
-where substring(`date`,1,7) is not null
-group by `MONTH`
-order by 1 ASC;
+-- 5. Monthly Layoffs Summary
+-- Aggregate the total layoffs by month and order by month in ascending order
+SELECT SUBSTRING(`date`, 1, 7) AS `MONTH`, SUM(total_laid_off)
+FROM layoff_staging2
+WHERE SUBSTRING(`date`, 1, 7) IS NOT NULL
+GROUP BY `MONTH`
+ORDER BY `MONTH` ASC;
 
-with rolling_totale as
-(
-select substring(`date`,1,7) as `MONTH`, sum(total_laid_off) as total_off
-from layoff_staging2
-where substring(`date`,1,7) is not null
-group by `MONTH`
-order by 1 ASC
+-- 6. Rolling Total of Layoffs Over Time
+-- Calculate a rolling total of layoffs by month
+WITH rolling_totals AS (
+  SELECT SUBSTRING(`date`, 1, 7) AS `MONTH`, SUM(total_laid_off) AS total_off
+  FROM layoff_staging2
+  WHERE SUBSTRING(`date`, 1, 7) IS NOT NULL
+  GROUP BY `MONTH`
+  ORDER BY `MONTH` ASC
 )
-select `MONTH`, sum(total_off) over(order by `MONTH`) as rolling_over
-from rolling_totale;
+SELECT `MONTH`, SUM(total_off) OVER (ORDER BY `MONTH`) AS rolling_over
+FROM rolling_totals;
 
-select company, sum(total_laid_off)
-from layoff_staging2
-group by company
-order by 2 desc;
+-- 7. Layoffs by Company (Repeated Query)
+-- Summarize total layoffs by company and order by highest totals (same as step 2)
+SELECT company, SUM(total_laid_off)
+FROM layoff_staging2
+GROUP BY company
+ORDER BY SUM(total_laid_off) DESC;
 
-select company, year(`date`), sum(total_laid_off)
-from layoff_staging2
-group by company, year(`date`);
+-- 8. Layoffs by Company and Year
+-- Aggregate layoffs by both company and year
+SELECT company, YEAR(`date`), SUM(total_laid_off)
+FROM layoff_staging2
+GROUP BY company, YEAR(`date`);
 
-with company_year (company,years,total_laid_off) as 
-(
-select company, year(`date`), sum(total_laid_off)
-from layoff_staging2
-group by company, year(`date`)
-), company_year_rank as
-(
-select *, dense_rank() over(partition by years order by total_laid_off desc) As rainking
-from company_year
-where years is not null
+-- 9. Ranking Companies by Yearly Layoffs
+-- Rank companies within each year by total layoffs
+WITH company_year AS (
+  SELECT company, YEAR(`date`) AS years, SUM(total_laid_off) AS total_laid_off
+  FROM layoff_staging2
+  GROUP BY company, years
+), company_year_rank AS (
+  SELECT *, DENSE_RANK() OVER (PARTITION BY years ORDER BY total_laid_off DESC) AS ranking
+  FROM company_year
+  WHERE years IS NOT NULL
 )
-select * 
-from company_year_rank
-;
-
+SELECT * 
+FROM company_year_rank;
